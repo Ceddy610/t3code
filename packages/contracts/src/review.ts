@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { LocalSnapshotId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { GitCommandError } from "./git.ts";
 import { VcsError } from "./vcs.ts";
 
@@ -11,6 +11,8 @@ export const ReviewDiffPreviewInput = Schema.Struct({
   sourceKind: Schema.optionalKey(Schema.Literals(["working-tree", "branch-range"])),
   trackedOnly: Schema.optionalKey(Schema.Boolean),
   metadataOnly: Schema.optionalKey(Schema.Boolean),
+  /** Diff a directory outside Git against this baseline instead of asking the VCS. */
+  snapshotId: Schema.optionalKey(LocalSnapshotId),
   file: Schema.optionalKey(
     Schema.Struct({
       path: Schema.NonEmptyString,
@@ -51,6 +53,10 @@ export const ReviewDiffFileStat = Schema.Struct({
   previousPath: Schema.NullOr(Schema.String),
   additions: Schema.Number,
   deletions: Schema.Number,
+  /** Snapshot diffs always set it; Git diffs may leave it unset. */
+  status: Schema.optionalKey(Schema.Literals(["added", "modified", "deleted"])),
+  /** Snapshot diffs: the file changed too much to diff, so it has no line counts. */
+  tooLargeToDiff: Schema.optionalKey(Schema.Boolean),
 });
 export type ReviewDiffFileStat = typeof ReviewDiffFileStat.Type;
 
@@ -66,6 +72,8 @@ export const ReviewDiffPreviewSource = Schema.Struct({
   truncated: Schema.Boolean,
   patchesDeferred: Schema.optionalKey(Schema.Boolean),
   files: Schema.optionalKey(Schema.Array(ReviewDiffFileStat)),
+  /** Local snapshot sources only: when their baseline was captured. */
+  capturedAt: Schema.optionalKey(Schema.String),
 });
 export type ReviewDiffPreviewSource = typeof ReviewDiffPreviewSource.Type;
 
@@ -77,6 +85,7 @@ export const ReviewDiffFileContentsInput = Schema.Struct({
   headRef: Schema.NullOr(TrimmedNonEmptyString),
   oldPath: TrimmedNonEmptyString,
   newPath: TrimmedNonEmptyString,
+  snapshotId: Schema.optionalKey(LocalSnapshotId),
 });
 export type ReviewDiffFileContentsInput = typeof ReviewDiffFileContentsInput.Type;
 

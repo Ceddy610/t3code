@@ -47,6 +47,7 @@ import {
   type DesktopWslState,
   type EnvironmentId,
   type FilesystemBrowseResult,
+  type ProjectId,
   SourceControlProviderKind,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   resolveEnvironmentMachineKind,
@@ -72,6 +73,7 @@ import {
   MonitorIcon,
   PinIcon,
   PinOffIcon,
+  SquareKanbanIcon,
   SquarePenIcon,
   TextSearchIcon,
   UserPlusIcon,
@@ -178,6 +180,7 @@ import {
 } from "../wslPaths";
 import {
   resolveCommandPaletteProject,
+  buildProjectActionItems,
   ADDON_ICON_CLASS,
   browseInputEndPaddingClass,
   buildBrowseGroups,
@@ -266,6 +269,10 @@ import { threadRecentUse } from "@t3tools/shared/paletteSearch";
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 const ADD_PROJECT_ENTRY_GROUP = "add-project";
 const NEW_THREAD_IN_GROUP = "projects";
+
+function boardProjectIcon() {
+  return <SquareKanbanIcon className={ITEM_ICON_CLASS} />;
+}
 
 /** The submenu an open intent starts in; its groups resolve while rendering. */
 function openIntentView(intent: CommandPaletteOpenIntent | null): CommandPaletteView | null {
@@ -1583,6 +1590,48 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/usage" });
     },
   });
+
+  const supportsBoards = (environmentId: EnvironmentId) =>
+    environments.find((environment) => environment.environmentId === environmentId)?.serverConfig
+      ?.environment.capabilities.projectBoards === true;
+  const openBoard = async (project: { environmentId: EnvironmentId; id: ProjectId }) => {
+    await navigate({
+      to: "/board/$environmentId/$projectId",
+      params: { environmentId: project.environmentId, projectId: project.id },
+    });
+  };
+  if (currentProject && supportsBoards(currentProject.environmentId)) {
+    actionItems.push({
+      kind: "action",
+      value: "action:open-board",
+      searchTerms: ["board", "kanban", "tickets", "lanes", "tasks", currentProject.title],
+      title: "Open board",
+      icon: <SquareKanbanIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "board.open",
+      run: () => openBoard(currentProject),
+    });
+  }
+  const boardProjectItems = buildProjectActionItems({
+    projects: pickerProjects.filter(
+      (project) =>
+        supportsBoards(project.environmentId) &&
+        !isScratchProject(project, scratchWorkspaceRootFor(project.environmentId)),
+    ),
+    valuePrefix: "open-board-in",
+    icon: boardProjectIcon,
+    runProject: openBoard,
+  });
+  if (boardProjectItems.length > 0) {
+    actionItems.push({
+      kind: "submenu",
+      value: "action:open-board-in",
+      searchTerms: ["board", "kanban", "tickets", "project"],
+      title: "Open board in...",
+      icon: <SquareKanbanIcon className={ITEM_ICON_CLASS} />,
+      addonIcon: <SquareKanbanIcon className={ADDON_ICON_CLASS} />,
+      groups: [{ value: "board-projects", label: "Projects", items: boardProjectItems }],
+    });
+  }
 
   for (const direction of [1, -1] as const) {
     const title = direction === 1 ? "Focus Next Workspace Area" : "Focus Previous Workspace Area";

@@ -147,6 +147,8 @@ export const writes = <P, A, E, R>(
   options?: {
     /** Whether a linked caller may make it, as for uploads its own sends need. */
     readonly linkedCallers?: "allowed";
+    /** What a refused linked caller is told it cannot do. */
+    readonly what?: string;
   },
 ) =>
   declare(
@@ -155,7 +157,7 @@ export const writes = <P, A, E, R>(
         Effect.tap((caller) =>
           options?.linkedCallers === "allowed"
             ? Effect.void
-            : assertNotLinked(caller, "change this environment's scheduled tasks"),
+            : assertNotLinked(caller, options?.what ?? "change this environment's scheduled tasks"),
         ),
         Effect.flatMap(() => handle(params)),
       ),

@@ -21,6 +21,7 @@ import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
+import * as LocalSnapshots from "./LocalSnapshots.ts";
 
 const WORKSPACE_BOUND_SUBJECTS = {
   "ReviewService.getBranchCommits": "commit list",
@@ -51,6 +52,7 @@ export const make = Effect.gen(function* () {
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const knownWorkspaces = yield* KnownWorkspaces.KnownWorkspaces;
+  const localSnapshots = yield* LocalSnapshots.LocalSnapshots;
 
   const canonicalizePath = (value: string) => {
     const resolvedPath = path.resolve(value);
@@ -70,6 +72,14 @@ export const make = Effect.gen(function* () {
       }),
     );
   };
+
+  const toReviewError = (cwd: string) => (error: LocalSnapshots.LocalSnapshotError) =>
+    new VcsRepositoryDetectionError({
+      operation: `LocalSnapshots.${error.operation}`,
+      cwd,
+      detail: error.detail,
+      cause: error,
+    });
 
   const assertWorkspaceBoundCwd = Effect.fn("ReviewService.assertWorkspaceBoundCwd")(function* (
     operation: keyof typeof WORKSPACE_BOUND_SUBJECTS,
@@ -115,6 +125,23 @@ export const make = Effect.gen(function* () {
   )(function* (input) {
     yield* assertWorkspaceBoundCwd("ReviewService.getDiffPreview", input.cwd);
 
+    if (input.snapshotId !== undefined) {
+      const sources =
+        input.sourceKind === undefined || input.sourceKind === "working-tree"
+          ? [
+              yield* localSnapshots
+                .diff({
+                  snapshotId: input.snapshotId,
+                  cwd: input.cwd,
+                  metadataOnly: input.metadataOnly,
+                  file: input.file,
+                })
+                .pipe(Effect.mapError(toReviewError(input.cwd))),
+            ]
+          : [];
+      return { cwd: input.cwd, generatedAt: yield* DateTime.now, sources };
+    }
+
     const handle = yield* vcsRegistry.detect({ cwd: input.cwd, requestedKind: "auto" });
     if (!handle) {
       return {
@@ -131,6 +158,17 @@ export const make = Effect.gen(function* () {
     "ReviewService.getDiffFileContents",
   )(function* (input) {
     yield* assertWorkspaceBoundCwd("ReviewService.getDiffFileContents", input.cwd);
+
+    if (input.snapshotId !== undefined) {
+      return yield* localSnapshots
+        .fileContents({
+          snapshotId: input.snapshotId,
+          cwd: input.cwd,
+          oldPath: input.oldPath,
+          newPath: input.newPath,
+        })
+        .pipe(Effect.mapError(toReviewError(input.cwd)));
+    }
 
     const handle = yield* vcsRegistry.detect({ cwd: input.cwd, requestedKind: "auto" });
     if (handle?.kind !== "git") {

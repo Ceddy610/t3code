@@ -147,6 +147,10 @@
       "types": "./src/state/auth.ts",
       "default": "./src/state/auth.ts"
     },
+    "./state/board": {
+      "types": "./src/state/board.ts",
+      "default": "./src/state/board.ts"
+    },
     "./state/assets": {
       "types": "./src/state/assets.ts",
       "default": "./src/state/assets.ts"

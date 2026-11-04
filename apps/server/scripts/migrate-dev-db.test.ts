@@ -99,6 +99,24 @@ const createFixtureSource = Effect.fn("createMigrateDevDbFixtureSource")(functio
         (environment_id, secret_name, label, urls_json, access, linked_at, expires_at)
         VALUES ('environment-box', 'peer-link-box', 'Box', '["https://box.example"]', 'auto',
           '2026-08-01', '2027-08-01')`;
+      yield* sql`INSERT INTO board_lanes
+        (lane_id, project_id, name, position, agent_rule_json, created_at, updated_at)
+        VALUES ('lane-ready', 'project-kept', 'Ready', 1024, '{"enabled":true,"instructions":""}',
+          '2026-08-01', '2026-08-01')`;
+      yield* sql`INSERT INTO board_tickets
+        (ticket_id, project_id, lane_id, position, title, description, assignees_json, labels_json,
+          agent_lane_id, agent_status, agent_picked_up_by, agent_picked_up_at, agent_updated_at,
+          created_at, updated_at)
+        VALUES ('ticket-1', 'project-kept', 'lane-ready', 1024, 'Fix', '', '[]', '[]', 'lane-ready',
+          'launching', 'lane_rule', '2026-08-01', '2026-08-01', '2026-08-01', '2026-08-01')`;
+      yield* sql`INSERT INTO local_snapshots
+        (snapshot_id, project_id, cwd, captured_at, file_count, stored_bytes, truncated)
+        VALUES ('snapshot-1', 'project-kept', '/tmp/kept', '2026-08-01', 1, 1, 0)`;
+      yield* sql`INSERT INTO board_changes
+        (change_id, ticket_id, project_id, cwd, title, summary, status, snapshot_id, created_by,
+          created_at, updated_at)
+        VALUES ('change-1', 'ticket-1', 'project-kept', '/tmp/kept', 'Fix', '', 'in_progress',
+          'snapshot-1', 'system', '2026-08-01', '2026-08-01')`;
     }),
   );
   return databasePath;
@@ -143,7 +161,18 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
                 (SELECT COUNT(*) FROM scheduled_task_webhook_pending) AS webhooks,
               (SELECT COUNT(*) FROM orchestration_v2_projection_context_transfers) AS transfers,
               (SELECT COUNT(*) FROM peer_environment_links) AS links`;
-          return { threads, events, sessions, leftovers };
+          const [board] = yield* sql<{
+            rule_enabled: number;
+            agent_status: string;
+            snapshots: number;
+            snapshot_id: string | null;
+          }>`
+            SELECT
+              (SELECT json_extract(agent_rule_json, '$.enabled') FROM board_lanes) AS rule_enabled,
+              (SELECT agent_status FROM board_tickets) AS agent_status,
+              (SELECT COUNT(*) FROM local_snapshots) AS snapshots,
+              (SELECT snapshot_id FROM board_changes) AS snapshot_id`;
+          return { threads, events, sessions, leftovers, board };
         }),
       );
       assert.deepStrictEqual(
@@ -164,6 +193,12 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
         webhooks: 0,
         transfers: 0,
         links: 0,
+      });
+      assert.deepStrictEqual(kept.board, {
+        rule_enabled: 0,
+        agent_status: "failed",
+        snapshots: 0,
+        snapshot_id: null,
       });
     }),
   );

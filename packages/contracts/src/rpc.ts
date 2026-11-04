@@ -376,6 +376,15 @@ import {
   ScheduledTaskUpsertInput,
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
+import {
+  BoardError,
+  BoardGetTicketInput,
+  BoardMutation,
+  BoardMutationResult,
+  BoardStreamEvent,
+  BoardSubscribeInput,
+  BoardTicketDetail,
+} from "./board.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
   ProjectCloneActionInput,
@@ -548,6 +557,10 @@ export const WS_METHODS = {
   guestShareCreate: "guestShare.create",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
+
+  boardSubscribe: "board.subscribe",
+  boardGetTicket: "board.getTicket",
+  boardMutate: "board.mutate",
 
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -1906,6 +1919,25 @@ const WsScheduledTasksSubscribeRpc = Rpc.make(WS_METHODS.scheduledTasksSubscribe
   stream: true,
 });
 
+const WsBoardSubscribeRpc = Rpc.make(WS_METHODS.boardSubscribe, {
+  payload: BoardSubscribeInput,
+  success: BoardStreamEvent,
+  error: Schema.Union([BoardError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsBoardGetTicketRpc = Rpc.make(WS_METHODS.boardGetTicket, {
+  payload: BoardGetTicketInput,
+  success: BoardTicketDetail,
+  error: Schema.Union([BoardError, EnvironmentAuthorizationError]),
+});
+
+const WsBoardMutateRpc = Rpc.make(WS_METHODS.boardMutate, {
+  payload: BoardMutation,
+  success: BoardMutationResult,
+  error: Schema.Union([BoardError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksUpsertRpc = Rpc.make(WS_METHODS.scheduledTasksUpsert, {
   payload: ScheduledTaskUpsertInput,
   success: ScheduledTaskMutationResult,
@@ -2053,6 +2085,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsSecretsAnswerRequestRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
+  WsBoardSubscribeRpc,
+  WsBoardGetTicketRpc,
+  WsBoardMutateRpc,
   WsServerReportClientActivityRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,

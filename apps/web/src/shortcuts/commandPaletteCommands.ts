@@ -1,3 +1,4 @@
+import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import type { AnyRouter } from "@tanstack/react-router";
 
 import {
@@ -11,6 +12,8 @@ import { toggleThemeEditorForTheme } from "../components/settings/themeEditorSto
 import { toastManager } from "../components/ui/toast";
 import { getThemeSnapshot, setAppearanceMode } from "../hooks/useTheme";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
+import { readEnvironmentSupportsProjectBoards } from "../state/board";
+import { readThreadShell } from "../state/entities";
 import { type CommandHandler, type CommandScopeOptions, registerCommands } from "./dispatcher";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { resolveThreadRouteTarget } from "../threadRoutes";
@@ -40,6 +43,19 @@ export function installCommandPaletteCommands(
   const readRouteThreadRef = () => {
     const target = resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {});
     return target?.kind === "server" ? target.threadRef : null;
+  };
+
+  const readRouteProject = (): { environmentId: EnvironmentId; projectId: ProjectId } | null => {
+    const params: Record<string, string | undefined> = router.state.matches.at(-1)?.params ?? {};
+    if (params.environmentId && params.projectId) {
+      return {
+        environmentId: params.environmentId as EnvironmentId,
+        projectId: params.projectId as ProjectId,
+      };
+    }
+    const threadRef = readRouteThreadRef();
+    const shell = threadRef ? readThreadShell(threadRef) : null;
+    return shell ? { environmentId: shell.environmentId, projectId: shell.projectId } : null;
   };
 
   // A child search (files, contents) goes back to the palette on Escape before
@@ -91,6 +107,24 @@ export function installCommandPaletteCommands(
         consume(event);
         dispatchCommandPalette({ _tag: "SetOpen", open: false });
         void router.navigate({ to: "/usage" });
+      },
+      "board.open": (event) => {
+        consume(event);
+        dispatchCommandPalette({ _tag: "SetOpen", open: false });
+        const project = readRouteProject();
+        if (project === null) {
+          toastManager.add({ type: "info", title: "Open a project's thread to open its board" });
+          return;
+        }
+        if (!readEnvironmentSupportsProjectBoards(project.environmentId)) {
+          toastManager.add({
+            type: "info",
+            title: "Boards are not available here",
+            description: "This environment runs an older T3 Code. Update it to use project boards.",
+          });
+          return;
+        }
+        void router.navigate({ to: "/board/$environmentId/$projectId", params: project });
       },
       "commandPalette.toggle": toggleOverlay("commandPalette.toggle"),
       "filePicker.toggle": toggleOverlay("filePicker.toggle"),

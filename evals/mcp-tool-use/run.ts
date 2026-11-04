@@ -13,6 +13,9 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  BoardChangeId,
+  BoardReviewCommentId,
+  BoardTicketId,
   ComposerContextRecord,
   DeviceOperationError,
   DeviceSummary,
@@ -33,6 +36,7 @@ import { Tool } from "effect/ai";
 import * as McpSchema from "effect/ai/McpSchema";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 
+import { pickupPrompt, reviewFeedbackMessage } from "../../apps/server/src/board/boardPrompts.ts";
 import { taskPrompt } from "../../apps/server/src/mcp/delegatedTaskModes.ts";
 import * as McpInvocationContext from "../../apps/server/src/mcp/McpInvocationContext.ts";
 import { advertisedJsonSchema } from "../../apps/server/src/mcp/advertisedJsonSchema.ts";
@@ -48,6 +52,7 @@ import { buildCodexAdditionalContext } from "../../apps/server/src/provider/Code
 import { makeSideChatContext } from "../../apps/server/src/orchestration-v2/ContextHandoffService.ts";
 import { withInlineContext } from "../../apps/server/src/orchestration-v2/ContextHandoffDelivery.ts";
 import { AttachmentToolkit } from "../../apps/server/src/mcp/toolkits/attachment/tools.ts";
+import { BoardToolkit } from "../../apps/server/src/mcp/toolkits/board/tools.ts";
 import { DeviceToolkit } from "../../apps/server/src/mcp/toolkits/device/tools.ts";
 import { EnvironmentToolkit } from "../../apps/server/src/mcp/toolkits/environment/tools.ts";
 import { HtmlToolkit } from "../../apps/server/src/mcp/toolkits/html/tools.ts";
@@ -276,6 +281,35 @@ export const McpToolUseCase = Schema.Struct({
     sideChat: Schema.optional(
       Schema.Struct({ parentThreadId: Schema.String, digest: Schema.Array(Schema.String) }),
     ),
+    /**
+     * A thread a board lane rule started: T3's pickup prompt opens it. With `review`, the
+     * prompt is T3's queued review feedback, and `prompt` stays empty.
+     */
+    board: Schema.optional(
+      Schema.Struct({
+        projectTitle: Schema.String,
+        lane: Schema.String,
+        instructions: Schema.String,
+        ticket: Schema.Struct({
+          id: Schema.String,
+          title: Schema.String,
+          description: Schema.String,
+        }),
+        review: Schema.optional(
+          Schema.Struct({
+            changeId: Schema.String,
+            changeTitle: Schema.String,
+            comments: Schema.Array(
+              Schema.Struct({
+                id: Schema.String,
+                body: Schema.String,
+                filePath: Schema.NullOr(Schema.String),
+              }),
+            ),
+          }),
+        ),
+      }),
+    ),
   }),
   /** Empty to resume a top-level thread without side-chat context after its last tool result. */
   prompt: Schema.String,
@@ -288,6 +322,21 @@ export const McpToolUseCase = Schema.Struct({
   notes: Schema.optional(Schema.String),
 });
 export type McpToolUseCase = typeof McpToolUseCase.Type;
+
+/** The user turn: the case's prompt, or the review feedback T3 queues to a board agent. */
+const casePrompt = (testCase: McpToolUseCase) => {
+  const review = testCase.setup.board?.review;
+  return review === undefined
+    ? testCase.prompt
+    : reviewFeedbackMessage({
+        ticket: testCase.setup.board!.ticket,
+        change: { id: BoardChangeId.make(review.changeId), title: review.changeTitle },
+        comments: review.comments.map((comment) => ({
+          ...comment,
+          id: BoardReviewCommentId.make(comment.id),
+        })),
+      });
+};
 const AnyBlock = Schema.StructWithRest(
   Schema.Struct({ type: Schema.String, text: Schema.optional(Schema.String) }),
   Rest,
@@ -386,6 +435,7 @@ export const normalizeToolInput = (name: string, input: unknown) => {
 const t3SourceTools: ReadonlyArray<Tool.Any> = [
   OrchestratorToolkit,
   ThreadToolkit,
+  BoardToolkit,
   AttachmentToolkit,
   ProjectToolkit,
   EnvironmentToolkit,
@@ -884,7 +934,8 @@ export const buildMessages = (sample: Sample) => {
   };
   const { role, context, delegateRole, priorTurns = [] } = testCase.setup;
   const sideChat = testCase.setup.sideChat;
-  if (testCase.prompt === "" && (role !== "top" || sideChat !== undefined)) {
+  const casePromptText = casePrompt(testCase);
+  if (casePromptText === "" && (role !== "top" || sideChat !== undefined)) {
     throw new Error(
       `${testCase.id}: Empty-prompt replay requires a top-level thread without side-chat context.`,
     );
@@ -905,6 +956,25 @@ export const buildMessages = (sample: Sample) => {
   ];
   const reminders = base.reminders.toSpliced(base.gitStatusAt, 0, reminder(gitStatus(testCase)));
   push("user", ...reminders, ...notes.flatMap((note) => (note ? [reminder(note)] : [])));
+  const board = testCase.setup.board;
+  if (board !== undefined) {
+    const ticket = {
+      ...board.ticket,
+      id: BoardTicketId.make(board.ticket.id),
+      unresolvedCommentCount: 0,
+    };
+    push(
+      "user",
+      text(
+        pickupPrompt({
+          ticket,
+          lane: { name: board.lane },
+          projectTitle: board.projectTitle,
+          rule: { instructions: board.instructions },
+        }),
+      ),
+    );
+  }
   const toolSearch = findTool(base, "ToolSearch")?.name ?? "ToolSearch";
   let nextId = 0;
   for (const turn of priorTurns) {
@@ -940,12 +1010,12 @@ export const buildMessages = (sample: Sample) => {
   }
   const userText =
     testCase.promptContext === undefined
-      ? testCase.prompt
-      : projectComposerContextForProvider({ text: testCase.prompt, ...testCase.promptContext });
+      ? casePromptText
+      : projectComposerContextForProvider({ text: casePromptText, ...testCase.promptContext });
   const prompt =
     sideChatContext === undefined ? userText : withInlineContext(sideChatContext, userText);
   const childPrompt = () => taskPrompt({ task: prompt, role: delegateRole });
-  if (testCase.prompt !== "")
+  if (casePromptText !== "")
     push("user", text(role === "delegated-child" ? childPrompt() : prompt));
   // Claude Code gives a subagent its SubagentStart hooks' context as a reminder after the task.
   if (native && base.subagentContext) {
@@ -1328,7 +1398,7 @@ export const shellRequest = (sample: Sample, call: Omit<ShellEntry, "output">, m
         ]
       : []),
     ...(context ? [`The agent was told: ${context}`] : []),
-    `The agent's task: ${testCase.prompt}`,
+    `The agent's task: ${casePrompt(testCase)}`,
   ];
   const history = shell.map((entry) => `${callText(entry)}\n<output>\n${entry.output}\n</output>`);
   return {

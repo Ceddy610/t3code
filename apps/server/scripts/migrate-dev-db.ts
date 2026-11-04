@@ -384,6 +384,16 @@ const pruneSnapshot = Effect.fn("pruneDevDbSnapshot")(function* (input: RunMigra
       for (const table of CLEARED_TABLES) {
         yield* sql`DELETE FROM ${sql(table)}`;
       }
+      // Board lane rules would start the developer's agents on this dev server.
+      yield* sql`UPDATE board_lanes
+        SET agent_rule_json = json_set(agent_rule_json, '$.enabled', json('false'))
+        WHERE agent_rule_json IS NOT NULL`;
+      yield* sql`UPDATE board_tickets
+        SET agent_status = 'failed', agent_note = 'Copied from another environment'
+        WHERE agent_status = 'launching'`;
+      // Snapshot blobs live outside the database and are not copied.
+      yield* sql`DELETE FROM local_snapshots`;
+      yield* sql`UPDATE board_changes SET snapshot_id = NULL`;
     }),
   );
 

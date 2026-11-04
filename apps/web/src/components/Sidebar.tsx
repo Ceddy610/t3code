@@ -152,6 +152,7 @@ import {
   useServerConfigs,
   useQuietThreadShells,
 } from "../state/entities";
+import { readEnvironmentSupportsProjectBoards } from "../state/board";
 import { environmentPresentations } from "../state/presentation";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { environmentProjects } from "../state/projects";
@@ -1274,6 +1275,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           api.contextMenu.show(
             [
               { id: "new-thread", label: "New thread" },
+              ...(readEnvironmentSupportsProjectBoards(group.environmentId)
+                ? [{ id: "open-board", label: "Open board" }]
+                : []),
               { id: "copy-path", label: "Copy path" },
               ...(canPinProject(group)
                 ? [
@@ -1291,6 +1295,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         switch (clicked.value) {
           case "new-thread":
             startThreadInProjectFolder(group);
+            return;
+          case "open-board":
+            if (isMobile) setOpenMobile(false);
+            void router.navigate({
+              to: "/board/$environmentId/$projectId",
+              params: { environmentId: group.environmentId, projectId: group.id },
+            });
             return;
           case "copy-path":
             copyPathToClipboard(group.workspaceRoot, { path: group.workspaceRoot });

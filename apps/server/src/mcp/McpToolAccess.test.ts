@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
 
 import { OrchestratorProjectionError } from "../orchestration-v2/Orchestrator.ts";
@@ -324,6 +325,33 @@ it.effect.each([
           getThreadShell: (threadId) => Effect.succeed(shells.get(threadId) ?? null),
         }),
       ),
+    ),
+  ),
+);
+
+it.effect("tells a refused linked caller what a write would have changed", () =>
+  Effect.gen(function* () {
+    const WriteToolkit = Toolkit.make(Tool.make("writes", probe));
+    const toolkit = yield* WriteToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(
+          McpToolAccess.toLayer(WriteToolkit, {
+            writes: McpToolAccess.writes(() => ran, { what: "change the board" }),
+          }),
+        ),
+      ),
+    );
+    const result = yield* toolkit.handle("writes", {}).pipe(Stream.unwrap, Stream.runCollect);
+    expect(result.at(-1)?.result).toMatchObject({
+      code: "capability_denied",
+      message: expect.stringContaining("it cannot change the board."),
+    });
+  }).pipe(
+    Effect.provideService(McpInvocationContext.McpInvocationContext, linkedClient),
+    Effect.provide(
+      Layer.mock(ThreadManagement.ThreadManagementService)({
+        getThreadShell: () => Effect.succeed(null),
+      }),
     ),
   ),
 );

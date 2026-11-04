@@ -72,6 +72,12 @@ receipts stay for idempotency: a retry older than the retained history is still 
 but its replay comes back without the pruned events. Receipts of imported legacy commands are
 removed once their threads are imported.
 
+Project boards ([BoardService](../../apps/server/src/board/BoardService.ts)) are plain persisted
+state, not orchestration events. Their listeners only enqueue after a commit; the
+[agent workflow](../../apps/server/src/board/BoardAgentWorkflow.ts) then launches pickups and sends
+review feedback with ids derived from the ticket or comments, so launch and send receipts make
+retries and startup recovery idempotent.
+
 Retained events must remain decodable on replay. Changing a schema affects old environments at
 startup as well as live RPC traffic. Compatibility work must account for stored history, not just
 what the newest client sends.

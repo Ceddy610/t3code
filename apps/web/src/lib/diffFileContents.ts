@@ -10,6 +10,7 @@ import type {
   PullRequestRef,
   ReviewDiffFileContentsInput,
   ReviewDiffFileContentsResult,
+  LocalSnapshotId,
   ReviewDiffPreviewSourceKind,
 } from "@t3tools/contracts";
 
@@ -22,6 +23,7 @@ interface GitDiffFileContentsSource {
   readonly baseRef: string | null;
   readonly headRef: string | null;
   readonly cacheKey: string;
+  readonly snapshotId?: LocalSnapshotId | undefined;
 }
 
 interface PullRequestDiffFileContentsSource {
@@ -89,6 +91,7 @@ export function createGitDiffFileContentsLoader<E>(
         headRef: source.headRef,
         oldPath,
         newPath,
+        ...(source.snapshotId === undefined ? {} : { snapshotId: source.snapshotId }),
       },
     });
     if (result._tag !== "Success") {

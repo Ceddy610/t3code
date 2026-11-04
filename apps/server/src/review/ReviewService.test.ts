@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -13,6 +14,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
+import * as LocalSnapshots from "./LocalSnapshots.ts";
 import * as ReviewService from "./ReviewService.ts";
 
 function layer(input: {
@@ -27,6 +29,7 @@ function layer(input: {
 }) {
   const projectRoots = input.projectRoots ?? [];
   return ReviewService.layer.pipe(
+    Layer.provideMerge(LocalSnapshots.layer),
     Layer.provide(KnownWorkspaces.layer),
     Layer.provide(
       Layer.effectDiscard(
@@ -91,7 +94,7 @@ function layer(input: {
       }),
     ),
     Layer.provide(ServerConfig.layerTest(input.workspaceRoot, input.baseDir)),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
 }
 
@@ -116,6 +119,37 @@ describe("ReviewService", () => {
         /must stay within the configured workspace root/,
       );
       assert.deepStrictEqual(detectCalls, []);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("routes a snapshot diff without asking the VCS, behind the same cwd guard", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
+      const outsideRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-outside-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const detectCalls: Array<{ readonly cwd: string }> = [];
+      yield* fs.writeFileString(`${workspaceRoot}/notes.txt`, "one\n");
+
+      yield* Effect.gen(function* () {
+        const snapshots = yield* LocalSnapshots.LocalSnapshots;
+        const review = yield* ReviewService.ReviewService;
+        const { snapshotId } = yield* snapshots.capture({ projectId: null, cwd: workspaceRoot });
+        yield* fs.writeFileString(`${workspaceRoot}/notes.txt`, "two\n");
+
+        const result = yield* review.getDiffPreview({ cwd: workspaceRoot, snapshotId });
+        assert.deepStrictEqual(
+          result.sources.map((source) => [source.id, source.files?.map((file) => file.status)]),
+          [[`local-snapshot:${snapshotId}`, ["modified"]]],
+        );
+        assert.deepStrictEqual(detectCalls, []);
+
+        const error = yield* review
+          .getDiffPreview({ cwd: outsideRoot, snapshotId })
+          .pipe(Effect.flip);
+        assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
+        assert.strictEqual(error.operation, "ReviewService.getDiffPreview");
+      }).pipe(Effect.provide(layer({ workspaceRoot, baseDir, detectCalls })));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

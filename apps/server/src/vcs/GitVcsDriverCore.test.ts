@@ -669,6 +669,15 @@ it.effect.each([
       for (const cwd of [bareRoot, nonRepository, path.join(nonRepository, "missing")]) {
         assert.isEmpty((yield* driver.getReviewDiffPreview(input(cwd))).sources);
       }
+      // Only a missing worktree yields no sources; a clean repository still lists both.
+      const clean = yield* driver.getReviewDiffPreview({ cwd: source, metadataOnly: true });
+      assert.deepStrictEqual(
+        clean.sources.map((candidate) => [candidate.kind, candidate.files?.length ?? 0]),
+        [
+          ["working-tree", 0],
+          ["branch-range", 0],
+        ],
+      );
 
       const brokenConfig = yield* makeTmpDir();
       yield* initRepoWithCommit(brokenConfig);
